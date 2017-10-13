@@ -1,12 +1,25 @@
-if [ -z "$BASH" ]; then
+SYSTEM=$(uname -s)
+if [ "$SYSTEM" = "Darwin" ]; then
     ECHO=echo
+    SO=dylib
+    LDD="otool -L"
+    if [ "$(getopt -V)" = " --" ]; then
+        >&2 $ECHO "gnu-getopt must be installed and used"
+        exit 1
+    fi
 else
-    ECHO='echo -e'
+    if [ -z "$BASH" ]; then
+        ECHO=echo
+    else
+        ECHO='echo -e'
+    fi
+    SO=so
+    LDD=ldd
 fi
-# NOTE: This requires GNU getopt.  On Mac OS X and FreeBSD, you have to install this
-# separately; see below.
-TEMP=`getopt -o v: --long headers:,libs:,cc:,cxx:,with-glog -n 'config_brpc' -- "$@"`
+
+TEMP=`getopt -o v: --long headers:,libs:,cc:,cxx:,with-glog:,nodebugsymbols -n 'config_brpc' -- "$@"`
 WITH_GLOG=0
+DEBUGSYMBOLS=-g
 
 if [ $? != 0 ] ; then >&2 $ECHO "Terminating..."; exit 1 ; fi
 
@@ -16,11 +29,12 @@ eval set -- "$TEMP"
 # Convert to abspath always so that generated mk is include-able from everywhere
 while true; do
     case "$1" in
-        --headers ) HDRS_IN="$(readlink -f $2)"; shift 2 ;;
-        --libs ) LIBS_IN="$(readlink -f $2)"; shift 2 ;;
+        --headers ) HDRS_IN="$(realpath $2)"; shift 2 ;;
+        --libs ) LIBS_IN="$(realpath $2)"; shift 2 ;;
         --cc ) CC=$2; shift 2 ;;
         --cxx ) CXX=$2; shift 2 ;;
         --with-glog ) WITH_GLOG=1; shift 1 ;;
+        --nodebugsymbols ) DEBUGSYMBOLS=; shift 1 ;;
         -- ) shift; break ;;
         * ) break ;;
     esac
@@ -50,7 +64,7 @@ if [ -z "$HDRS_IN" ] || [ -z "$LIBS_IN" ]; then
 fi
 
 find_dir_of_lib() {
-    local lib=$(find ${LIBS_IN} -name "lib${1}.a" -o -name "lib${1}.so" -o -name "lib${1}.so.*" | head -n1)
+    local lib=$(find ${LIBS_IN} -name "lib${1}.a" -o -name "lib${1}.$SO" | head -n1)
     if [ ! -z "$lib" ]; then
         dirname $lib
     fi
@@ -128,8 +142,8 @@ append_linking $PROTOBUF_LIB protobuf
 LEVELDB_LIB=$(find_dir_of_lib_or_die leveldb)
 # required by leveldb
 if [ -f $LEVELDB_LIB/libleveldb.a ]; then
-    if [ -f $LEVELDB_LIB/libleveldb.so ]; then
-        if ldd $LEVELDB_LIB/libleveldb.so | grep -q libsnappy; then
+    if [ -f $LEVELDB_LIB/libleveldb.$SO ]; then
+        if $LDD $LEVELDB_LIB/libleveldb.$SO | grep -q libsnappy; then
             SNAPPY_LIB=$(find_dir_of_lib snappy)
             REQUIRE_SNAPPY="yes"
         fi
@@ -246,11 +260,9 @@ if [ -z "$TCMALLOC_LIB" ]; then
     append_to_output "    \$(error \"Fail to find gperftools\")"
 else
     append_to_output_libs "$TCMALLOC_LIB" "    "
-    TCMALLOC_HDR=$(find_dir_of_header_or_die google/profiler.h)
-    append_to_output_headers "$TCMALLOC_HDR" "    "
     if [ -f $TCMALLOC_LIB/libtcmalloc_and_profiler.a ]; then
-        if [ -f $TCMALLOC_LIB/libtcmalloc.so ]; then
-            ldd $TCMALLOC_LIB/libtcmalloc.so > libtcmalloc.deps
+        if [ -f $TCMALLOC_LIB/libtcmalloc.$SO ]; then
+            $LDD $TCMALLOC_LIB/libtcmalloc.$SO > libtcmalloc.deps
             if grep -q libunwind libtcmalloc.deps; then
                 TCMALLOC_REQUIRE_UNWIND="yes"
                 REQUIRE_UNWIND="yes"
@@ -285,8 +297,8 @@ if [ $WITH_GLOG != 0 ]; then
     else
         append_to_output_libs "$GLOG_LIB" "    "
         if [ -f $GLOG_LIB/libglog.a ]; then
-            if [ -f "$GLOG_LIB/libglog.so" ]; then
-                ldd $GLOG_LIB/libglog.so > libglog.deps 
+            if [ -f "$GLOG_LIB/libglog.$SO" ]; then
+                $LDD $GLOG_LIB/libglog.$SO > libglog.deps
                 if grep -q libunwind libglog.deps; then
                     GLOG_REQUIRE_UNWIND="yes"
                     REQUIRE_UNWIND="yes"
@@ -311,7 +323,7 @@ if [ $WITH_GLOG != 0 ]; then
         rm -f libglog.deps
     fi
 fi
-append_to_output "CPPFLAGS+=-DBRPC_WITH_GLOG=$WITH_GLOG -DGFLAGS_NS=$GFLAGS_NS"
+append_to_output "CPPFLAGS+=-DBRPC_WITH_GLOG=$WITH_GLOG -DGFLAGS_NS=$GFLAGS_NS $DEBUGSYMBOLS"
 
 
 if [ ! -z "$REQUIRE_UNWIND" ]; then
