@@ -1,22 +1,24 @@
-// Copyright (c) 2014 Baidu, Inc.
-// 
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0
-// 
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
-// Author: Ge,Jun (gejun@baidu.com)
 // Date: Mon Sep 22 22:23:13 CST 2014
 
-#ifndef BASE_DOUBLY_BUFFERED_DATA_H
-#define BASE_DOUBLY_BUFFERED_DATA_H
+#ifndef BUTIL_DOUBLY_BUFFERED_DATA_H
+#define BUTIL_DOUBLY_BUFFERED_DATA_H
 
 #include <vector>                                       // std::vector
 #include <pthread.h>
@@ -27,6 +29,7 @@
 #include "butil/type_traits.h"
 #include "butil/errno.h"
 #include "butil/atomicops.h"
+#include "butil/unique_ptr.h"
 
 namespace butil {
 
@@ -238,17 +241,17 @@ private:
 template <typename T, typename TLS>
 typename DoublyBufferedData<T, TLS>::Wrapper*
 DoublyBufferedData<T, TLS>::AddWrapper() {
-    Wrapper* w = new (std::nothrow) Wrapper(this);
+    std::unique_ptr<Wrapper> w(new (std::nothrow) Wrapper(this));
     if (NULL == w) {
         return NULL;
     }
     try {
         BAIDU_SCOPED_LOCK(_wrappers_mutex);
-        _wrappers.push_back(w);
+        _wrappers.push_back(w.get());
     } catch (std::exception& e) {
         return NULL;
     }
-    return w;
+    return w.release();
 }
 
 // Called when thread quits.
@@ -414,4 +417,4 @@ size_t DoublyBufferedData<T, TLS>::ModifyWithForeground(
 
 }  // namespace butil
 
-#endif  // BASE_DOUBLY_BUFFERED_DATA_H
+#endif  // BUTIL_DOUBLY_BUFFERED_DATA_H
